@@ -1,0 +1,21 @@
+{
+  "name": "大学英语四级词汇 (CET-4)",
+  "description": "大学英语四级 (CET-4) 必考词汇精选。",
+  "cards": [
+    { "front": "ability", "back": "n. 能力；本领" },
+    { "front": "absolute", "back": "adj. 绝对的；完全的" },
+    { "front": "absorb", "back": "vt. 吸收；吸引" },
+    { "front": "abstract", "back": "adj. 抽象的 n. 摘要" },
+    { "front": "abundant", "back": "adj. 丰富的；充裕的" },
+    { "front": "abuse", "back": "vt. 滥用；虐待" },
+    { "front": "accelerate", "back": "vt. (使)加快；促进" },
+    { "front": "accent", "back": "n. 口音，腔调" },
+    { "front": "accept", "back": "vt. 接受；同意" },
+    { "front": "access", "back": "n. 接近；通道" },
+    { "front": "accident", "back": "n. 意外；事故" },
+    { "front": "accommodate", "back": "vt. 容纳；向...提供住处" },
+    { "front": "accompany", "back": "vt. 陪伴；伴随" },
+    { "front": "accomplish", "back": "vt. 达到(目的)；完成" },
+    { "front": "account", "back": "n. 账户；描述 vi. 解释" }
+  ]
+}

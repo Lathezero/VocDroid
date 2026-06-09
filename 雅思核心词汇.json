@@ -1,0 +1,21 @@
+{
+  "name": "雅思核心词汇 (IELTS)",
+  "description": "精选雅思考试高频核心词汇，包含常见释义。",
+  "cards": [
+    { "front": "abandon", "back": "v. 放弃，遗弃；n. 放任" },
+    { "front": "abnormal", "back": "adj. 反常的，异常的" },
+    { "front": "abolish", "back": "v. 废除，废止" },
+    { "front": "abrupt", "back": "adj. 突然的，意外的；唐突的" },
+    { "front": "absurd", "back": "adj. 荒谬的，可笑的" },
+    { "front": "abundance", "back": "n. 丰富，充裕" },
+    { "front": "accelerate", "back": "v. 使加速，促进" },
+    { "front": "accommodate", "back": "v. 容纳；向...提供住处；使适应" },
+    { "front": "accomplish", "back": "v. 完成，实现" },
+    { "front": "accumulate", "back": "v. 积累，积聚" },
+    { "front": "acknowledge", "back": "v. 承认；致谢" },
+    { "front": "acquire", "back": "v. 获得，取得；学到" },
+    { "front": "adapt", "back": "v. 使适应，改编" },
+    { "front": "adequate", "back": "adj. 充足的，足够的；胜任的" },
+    { "front": "advocate", "back": "v. 提倡，主张；n. 拥护者" }
+  ]
+}

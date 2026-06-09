@@ -1,0 +1,21 @@
+{
+  "name": "大学英语六级词汇 (CET-6)",
+  "description": "大学英语六级（CET-6）必考词汇精选。",
+  "cards": [
+    { "front": "obscure", "back": "adj. 模糊的，晦涩的；v. 掩盖" },
+    { "front": "obsolete", "back": "adj. 废弃的，淘汰的，过时的" },
+    { "front": "obstacle", "back": "n. 障碍，干扰" },
+    { "front": "optimistic", "back": "adj. 乐观的，乐观主义的" },
+    { "front": "optimum", "back": "adj. 最适宜的，最佳的" },
+    { "front": "paradox", "back": "n. 悖论，自相矛盾的人或事" },
+    { "front": "paralyze", "back": "v. 使瘫痪，使麻痹" },
+    { "front": "perpetual", "back": "adj. 永久的，长期的" },
+    { "front": "perspective", "back": "n. 视角，观点；透视图" },
+    { "front": "plausible", "back": "adj. 似是而非的，貌似有理的" },
+    { "front": "prestige", "back": "n. 威望，声望" },
+    { "front": "profound", "back": "adj. 深厚的，意义深远的，渊博的" },
+    { "front": "prominent", "back": "adj. 突出的，显著的，杰出的" },
+    { "front": "qualitative", "back": "adj. 定性的，性质的" },
+    { "front": "quantitative", "back": "adj. 定量的，数量的" }
+  ]
+}

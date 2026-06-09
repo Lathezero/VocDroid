@@ -1,0 +1,21 @@
+{
+  "name": "托福核心词汇 (TOEFL)",
+  "description": "精选托福考试高频核心词汇，助力留学考试。",
+  "cards": [
+    { "front": "abandon", "back": "vt. 放弃，抛弃" },
+    { "front": "abnormal", "back": "adj. 反常的，异常的" },
+    { "front": "abolish", "back": "vt. 废除，废止" },
+    { "front": "abrupt", "back": "adj. 突然的，意外的" },
+    { "front": "absurd", "back": "adj. 荒谬的，可笑的" },
+    { "front": "abundance", "back": "n. 丰富，充裕" },
+    { "front": "academic", "back": "adj. 学术的，学院的" },
+    { "front": "accelerate", "back": "vt. 使加快，使增速" },
+    { "front": "access", "back": "n. 接近；入口；途径" },
+    { "front": "accommodate", "back": "vt. 容纳；使适应" },
+    { "front": "accompany", "back": "vt. 陪伴，伴随" },
+    { "front": "accomplish", "back": "vt. 完成，实现" },
+    { "front": "accumulate", "back": "vt. 积累，积聚" },
+    { "front": "accurate", "back": "adj. 准确的，精确的" },
+    { "front": "accuse", "back": "vt. 指责，控告" }
+  ]
+}
