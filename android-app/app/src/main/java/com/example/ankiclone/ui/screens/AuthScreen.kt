@@ -32,6 +32,8 @@ import com.example.ankiclone.ui.components.ScreenHeader
 import com.example.ankiclone.ui.components.SecondaryButton
 import com.example.ankiclone.ui.components.StatChip
 import kotlinx.coroutines.launch
+import org.json.JSONObject
+import retrofit2.HttpException
 
 @Composable
 fun AuthScreen(onNavigateToHome: (String) -> Unit) {
@@ -42,6 +44,24 @@ fun AuthScreen(onNavigateToHome: (String) -> Unit) {
 
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+
+    fun parseAuthError(error: Throwable): String {
+        if (error is HttpException) {
+            val serverMessage = runCatching {
+                val rawBody = error.response()?.errorBody()?.string().orEmpty()
+                JSONObject(rawBody).optString("error").takeIf { it.isNotBlank() }
+            }.getOrNull()
+
+            return when (error.code()) {
+                401 -> "账号不存在或密码错误，请先注册或检查密码"
+                409 -> "用户名已存在，请直接登录或更换用户名"
+                400 -> serverMessage ?: "请输入用户名和密码"
+                else -> serverMessage ?: "服务器返回错误: ${error.code()}"
+            }
+        }
+
+        return error.message?.takeIf { it.isNotBlank() } ?: "网络请求失败"
+    }
 
     AppScreen {
         Column(
@@ -116,7 +136,7 @@ fun AuthScreen(onNavigateToHome: (String) -> Unit) {
                                     RetrofitClient.authToken = response.token
                                     onNavigateToHome(response.user.role)
                                 } catch (e: Exception) {
-                                    Toast.makeText(context, "请求失败: ${e.message}", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(context, parseAuthError(e), Toast.LENGTH_LONG).show()
                                 } finally {
                                     isLoading = false
                                 }

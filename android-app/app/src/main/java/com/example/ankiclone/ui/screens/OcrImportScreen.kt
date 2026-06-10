@@ -56,23 +56,31 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
 import retrofit2.HttpException
 import java.net.URLEncoder
 
+private const val OCR_TRANSLATION_BATCH_SIZE = 100
 private val ocrWordRegex = Regex("""[A-Za-z]+(?:[’'`-][A-Za-z]+)*""")
+private val ocrLinePrefixRegex = Regex("""^\s*(?:\d+[\.)、]|\(?[a-zA-Z]\)|[-*•·])\s*""")
 private val ignoredOcrTokens = setOf(
     "a", "an", "n", "v", "adj", "adv", "prep", "conj", "pron", "num", "art", "int", "vi", "vt",
+    "noun", "verb", "adjective", "adverb", "preposition", "conjunction", "pronoun",
     "am", "is", "are", "was", "were", "be", "been", "being", "do", "does", "did",
     "the", "this", "that", "these", "those", "and", "or", "but", "so", "if", "to",
     "of", "in", "on", "at", "by", "for", "with", "from", "as", "it", "its", "they",
-    "their", "them", "he", "she", "his", "her", "we", "our", "you", "your"
+    "their", "them", "he", "she", "his", "her", "we", "our", "you", "your",
+    "word", "words", "meaning", "meanings", "translation", "translations", "page", "unit", "lesson"
 )
 private val ocrTranslateClient = OkHttpClient()
 
 private fun normalizeOcrWord(rawWord: String): String {
     return rawWord
-        .lowercase()
+        .trim()
+        .lowercase(Locale.ROOT)
+        .replace(Regex("""^[\d\s\p{Punct}]+"""), "")
         .replace(Regex("[’‘`]"), "'")
         .replace(Regex("^[^a-z]+|[^a-z'-]+$"), "")
         .removeSuffix("'s")
@@ -82,28 +90,96 @@ private fun normalizeOcrWord(rawWord: String): String {
         .trim()
 }
 
+private fun isUsefulOcrWord(word: String): Boolean {
+    return word.length > 1 &&
+        word !in ignoredOcrTokens &&
+        ocrWordRegex.matches(word) &&
+        word.count { it == '-' || it == '\'' } <= 2
+}
+
+private fun addOcrWord(words: LinkedHashSet<String>, rawWord: String) {
+    val word = normalizeOcrWord(rawWord)
+    if (isUsefulOcrWord(word)) {
+        words.add(word)
+    }
+}
+
+private fun splitPotentialWordList(text: String): List<String> {
+    return text
+        .replace(Regex("""([a-z])([A-Z])"""), "$1 $2")
+        .split(Regex("""[\s,，;；/／|、]+"""))
+        .map { normalizeOcrWord(it) }
+        .filter(::isUsefulOcrWord)
+}
+
+private fun containsChinese(text: String): Boolean {
+    return text.any { it in '\u3400'..'\u9fff' }
+}
+
+private fun extractWordsFromOcrLine(line: String): List<String> {
+    val strongSeparatorMatch = Regex("""\s*(?:[:：=]|\s+[-–—]\s+)\s*""").find(line)
+    if (strongSeparatorMatch != null) {
+        return splitPotentialWordList(line.substring(0, strongSeparatorMatch.range.first))
+    }
+
+    val listSeparatorParts = Regex("""\s*[,，;；/／|、]\s*""").split(line).filter { it.isNotBlank() }
+    if (listSeparatorParts.size > 1) {
+        val hasTranslationLikeTail = listSeparatorParts.drop(1).any(::containsChinese)
+        val targetText = if (hasTranslationLikeTail) listSeparatorParts.first() else line
+        return splitPotentialWordList(targetText)
+    }
+
+    return splitPotentialWordList(line)
+}
+
 private fun extractWordsFromOcrText(text: String): List<String> {
     val words = LinkedHashSet<String>()
-    ocrWordRegex.findAll(text).forEach { match ->
-        val word = normalizeOcrWord(match.value)
-        if (word.length > 1 && word !in ignoredOcrTokens) {
-            words.add(word)
+
+    text
+        .replace('\r', '\n')
+        .lines()
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .forEach { rawLine ->
+            val line = rawLine.replace(ocrLinePrefixRegex, "").trim()
+            if (line.isBlank()) return@forEach
+
+            val segmentWords = extractWordsFromOcrLine(line)
+            if (segmentWords.isNotEmpty()) {
+                segmentWords.forEach { words.add(it) }
+            } else {
+                ocrWordRegex.findAll(line).forEach { match -> addOcrWord(words, match.value) }
+            }
         }
+
+    if (words.isEmpty()) {
+        ocrWordRegex.findAll(text).forEach { match -> addOcrWord(words, match.value) }
     }
+
     return words.toList()
 }
 
 private fun parseTranslationPayload(payload: String): String {
-    return JSONObject(payload)
+    val trimmedPayload = payload.trim()
+    if (trimmedPayload.startsWith("[")) {
+        val googlePayload = JSONArray(trimmedPayload)
+        val translatedParts = googlePayload.optJSONArray(0) ?: return ""
+        return buildString {
+            for (index in 0 until translatedParts.length()) {
+                val part = translatedParts.optJSONArray(index)
+                if (part != null) append(part.optString(0))
+            }
+        }.trim()
+    }
+
+    return JSONObject(trimmedPayload)
         .optJSONObject("responseData")
         ?.optString("translatedText")
         ?.trim()
         .orEmpty()
 }
 
-private fun translateWordDirectly(word: String): String {
-    val encodedWord = URLEncoder.encode(word, Charsets.UTF_8.name())
-    val url = "https://api.mymemory.translated.net/get?q=$encodedWord&langpair=en%7Czh-CN"
+private fun requestDirectTranslation(url: String): String {
     val request = Request.Builder()
         .url(url)
         .header("Accept", "application/json")
@@ -114,6 +190,16 @@ private fun translateWordDirectly(word: String): String {
         if (!response.isSuccessful) return ""
         return parseTranslationPayload(response.body?.string().orEmpty())
     }
+}
+
+private fun translateWordDirectly(word: String): String {
+    val encodedWord = URLEncoder.encode(word, Charsets.UTF_8.name())
+    val myMemoryUrl = "https://api.mymemory.translated.net/get?q=$encodedWord&langpair=en%7Czh-CN"
+    val googleUrl = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh-CN&dt=t&q=$encodedWord"
+
+    return requestDirectTranslation(myMemoryUrl)
+        .takeIf { it.isNotBlank() && !it.equals(word, ignoreCase = true) }
+        ?: requestDirectTranslation(googleUrl)
 }
 
 private suspend fun translateWordsDirectly(words: List<String>): Map<String, String> {
@@ -127,9 +213,26 @@ private suspend fun translateWordsDirectly(words: List<String>): Map<String, Str
     }
 }
 
+private suspend fun translateWordsWithBackend(words: List<String>): Map<String, String> {
+    val translations = mutableMapOf<String, String>()
+
+    words.chunked(OCR_TRANSLATION_BATCH_SIZE).forEach { batch ->
+        val response = RetrofitClient.apiService.translateWords(TranslateWordsRequest(batch))
+        response.translations.forEach { entry ->
+            val word = normalizeOcrWord(entry.word)
+            val translation = entry.translation.trim()
+            if (word.isNotBlank() && translation.isNotBlank()) {
+                translations[word] = translation
+            }
+        }
+    }
+
+    return translations
+}
+
 private fun buildTranslatedCards(words: List<String>, translations: Map<String, String>): List<CardRequest> {
-    return words.mapNotNull { word ->
-        val translation = translations[word]?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+    return words.map { word ->
+        val translation = translations[word]?.takeIf { it.isNotBlank() } ?: "待补充释义"
         CardRequest(front = word, back = translation)
     }
 }
@@ -184,10 +287,7 @@ fun OcrImportScreen(onNavigateBack: () -> Unit) {
         isLoading = true
         coroutineScope.launch {
             try {
-                val response = RetrofitClient.apiService.translateWords(TranslateWordsRequest(words))
-                val translationMap = response.translations.associate {
-                    normalizeOcrWord(it.word) to it.translation.trim()
-                }
+                val translationMap = translateWordsWithBackend(words)
                 val cards = buildTranslatedCards(words, translationMap)
 
                 if (cards.isEmpty()) {

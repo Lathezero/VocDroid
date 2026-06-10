@@ -136,8 +136,9 @@ app.get('/api/decks', authenticate, (req, res) => {
 
 // 简单的 HTML 清理函数
 function cleanHtml(str) {
-    if (!str) return '';
-    return str.replace(/<br\s*\/?>/gi, '\n')
+    if (str === undefined || str === null) return '';
+    return String(str)
+              .replace(/<br\s*\/?>/gi, '\n')
               .replace(/<[^>]*>?/gm, '')
               .replace(/&nbsp;/g, ' ')
               .trim();
@@ -154,6 +155,8 @@ function safeUnlink(filePath) {
 
 function normalizeWord(word) {
     return (word || '')
+        .toString()
+        .normalize('NFKC')
         .toLowerCase()
         .replace(/[’‘`]/g, "'")
         .replace(/^[^a-z]+|[^a-z'-]+$/gi, '')
@@ -193,50 +196,251 @@ function getLocalTranslation(word) {
     return LOCAL_TRANSLATION_DICTIONARY.get(normalizeWord(word)) || '';
 }
 
-function parseImportedJsonDeck(fileContent, originalName) {
-    const data = JSON.parse(fileContent.replace(/^\uFEFF/, ''));
-    const sourceCards = Array.isArray(data)
-        ? data
-        : Array.isArray(data.cards)
-            ? data.cards
-            : Array.isArray(data.words)
-                ? data.words
-                : [];
+const DEFAULT_IMPORTED_TRANSLATION = '待补充释义';
+const JSON_CONTAINER_KEYS = [
+    'cards',
+    'words',
+    'items',
+    'data',
+    'vocabulary',
+    'vocabularies',
+    'list',
+    'terms',
+    'entries',
+    'deck'
+];
+const JSON_METADATA_KEYS = new Set([
+    'id',
+    'name',
+    'deckName',
+    'deck_name',
+    'title',
+    'description',
+    'desc',
+    'createdAt',
+    'created_at',
+    'updatedAt',
+    'updated_at',
+    'cards',
+    'words',
+    'items',
+    'data',
+    'vocabulary',
+    'vocabularies',
+    'list',
+    'terms',
+    'entries',
+    'deck'
+]);
+const FRONT_FIELD_KEYS = [
+    'front',
+    'front_content',
+    'word',
+    'term',
+    'question',
+    'english',
+    'en',
+    'source',
+    'text'
+];
+const BACK_FIELD_KEYS = [
+    'back',
+    'back_content',
+    'translation',
+    'meaning',
+    'definition',
+    'answer',
+    'chinese',
+    'zh',
+    'zh_cn',
+    'cn',
+    'target',
+    'explanation'
+];
+const POS_FIELD_KEYS = ['partOfSpeech', 'part_of_speech', 'pos', 'type'];
 
-    const cards = sourceCards
-        .map((card) => {
-            if (Array.isArray(card)) {
+function firstCleanField(source, keys) {
+    for (const key of keys) {
+        if (source[key] !== undefined && source[key] !== null) {
+            const value = cleanHtml(source[key]);
+            if (value) return value;
+        }
+    }
+    return '';
+}
+
+function translationOrPlaceholder(front) {
+    return getLocalTranslation(front) || DEFAULT_IMPORTED_TRANSLATION;
+}
+
+function parseStringCard(value) {
+    const text = cleanHtml(value).replace(/\s+/g, ' ').trim();
+    if (!text) return null;
+
+    const separatorMatch = text.match(/^([A-Za-z][A-Za-z’'`\-\s]{0,80}?)(?:(?:\s*[:：=|,，;；/／]\s*)|(?:\s+[-–—]\s+))(.+)$/);
+    if (separatorMatch) {
+        const front = cleanHtml(separatorMatch[1]);
+        const back = cleanHtml(separatorMatch[2]);
+        if (front && back) return { front, back, partOfSpeech: null };
+    }
+
+    const meaningMatch = text.match(/^([A-Za-z]+(?:[’'`-][A-Za-z]+)*(?:\s+[A-Za-z]+(?:[’'`-][A-Za-z]+)*){0,3})\s+(.+)$/);
+    if (meaningMatch && /[\u3400-\u9fff]|[.;；，,]|(?:^|\s)(?:n|v|adj|adv|prep|conj|pron|vt|vi)\./i.test(meaningMatch[2])) {
+        const front = cleanHtml(meaningMatch[1]);
+        const back = cleanHtml(meaningMatch[2]);
+        if (front && back) return { front, back, partOfSpeech: null };
+    }
+
+    const normalized = normalizeWord(text);
+    if (/^[a-z]+(?:['-][a-z]+)*$/i.test(normalized)) {
+        return {
+            front: normalized,
+            back: translationOrPlaceholder(normalized),
+            partOfSpeech: null
+        };
+    }
+
+    return null;
+}
+
+function isScalarJsonValue(value) {
+    return value === null || ['string', 'number', 'boolean'].includes(typeof value);
+}
+
+function looksLikeTranslation(value) {
+    const text = cleanHtml(value);
+    if (!text) return false;
+    if (/[\u3400-\u9fff]/.test(text)) return true;
+    if (/[.;；,，:：]/.test(text)) return true;
+    if (/\s/.test(text)) return true;
+    return !/^[A-Za-z]+(?:[’'`-][A-Za-z]+)*$/.test(text);
+}
+
+function looksLikeFrontTerm(value) {
+    const text = cleanHtml(value);
+    return /^[A-Za-z]+(?:[’'`-][A-Za-z]+)*(?:\s+[A-Za-z]+(?:[’'`-][A-Za-z]+)*){0,4}$/.test(text);
+}
+
+function looksLikePartOfSpeech(value) {
+    const text = cleanHtml(value).toLowerCase();
+    return /^(?:n|noun|v|verb|vi|vt|adj|adjective|adv|adverb|prep|preposition|conj|conjunction|pron|pronoun|num|art|int)\.?$/.test(text);
+}
+
+function parseArrayCard(value) {
+    if (!Array.isArray(value) || value.length < 2 || !value.slice(0, 2).every(isScalarJsonValue)) {
+        return null;
+    }
+
+    if (!looksLikeFrontTerm(value[0])) {
+        return null;
+    }
+
+    if (!looksLikeTranslation(value[1]) && !(value.length === 3 && looksLikePartOfSpeech(value[2]))) {
+        return null;
+    }
+
+    const front = cleanHtml(value[0]);
+    const explicitBack = cleanHtml(value[1]);
+    const partOfSpeech = cleanHtml(value[2] || '') || null;
+    if (!front) return null;
+
+    return {
+        front,
+        back: explicitBack || translationOrPlaceholder(front),
+        partOfSpeech
+    };
+}
+
+function parseObjectCard(card) {
+    const front = firstCleanField(card, FRONT_FIELD_KEYS);
+    const explicitBack = firstCleanField(card, BACK_FIELD_KEYS);
+    const partOfSpeech = firstCleanField(card, POS_FIELD_KEYS) || null;
+
+    if (front) {
+        return {
+            front,
+            back: explicitBack || translationOrPlaceholder(front),
+            partOfSpeech
+        };
+    }
+
+    return null;
+}
+
+function parseDictionaryObject(obj) {
+    return Object.entries(obj)
+        .map(([key, value]) => {
+            if (JSON_METADATA_KEYS.has(key)) return null;
+            const front = cleanHtml(key);
+            if (!front) return null;
+
+            if (value && typeof value === 'object' && !Array.isArray(value)) {
+                const objectBack = firstCleanField(value, BACK_FIELD_KEYS);
+                const partOfSpeech = firstCleanField(value, POS_FIELD_KEYS) || null;
                 return {
-                    front: cleanHtml(card[0]),
-                    back: cleanHtml(card[1]),
-                    partOfSpeech: cleanHtml(card[2] || '') || null
+                    front,
+                    back: objectBack || translationOrPlaceholder(front),
+                    partOfSpeech
                 };
             }
 
-            if (!card || typeof card !== 'object') return null;
-
-            const front = cleanHtml(
-                card.front ||
-                card.front_content ||
-                card.word ||
-                card.term ||
-                card.question ||
-                ''
-            );
-            const back = cleanHtml(
-                card.back ||
-                card.back_content ||
-                card.translation ||
-                card.meaning ||
-                card.definition ||
-                card.answer ||
-                ''
-            );
-            const partOfSpeech = cleanHtml(card.partOfSpeech || card.part_of_speech || card.pos || '') || null;
-
-            return { front, back, partOfSpeech };
+            const back = cleanHtml(value) || translationOrPlaceholder(front);
+            return { front, back, partOfSpeech: null };
         })
-        .filter(card => card && card.front && card.back);
+        .filter(Boolean);
+}
+
+function extractCardsFromJsonValue(value, depth = 0) {
+    if (depth > 4 || value === undefined || value === null) return [];
+
+    if (Array.isArray(value)) {
+        const directCard = parseArrayCard(value);
+        if (directCard) return [directCard];
+        return value.flatMap(item => extractCardsFromJsonValue(item, depth + 1));
+    }
+
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+        return cleanHtml(value)
+            .split(/\r?\n/)
+            .map(line => parseStringCard(line))
+            .filter(Boolean);
+    }
+
+    if (typeof value !== 'object') return [];
+
+    const directCard = parseObjectCard(value);
+    const nestedCards = JSON_CONTAINER_KEYS
+        .filter(key => value[key] !== undefined && value[key] !== null)
+        .flatMap(key => extractCardsFromJsonValue(value[key], depth + 1));
+
+    if (directCard) {
+        return [directCard, ...nestedCards];
+    }
+
+    const dictionaryCards = parseDictionaryObject(value);
+    return [...nestedCards, ...dictionaryCards];
+}
+
+function normalizeImportedCard(card) {
+    const front = cleanHtml(card.front);
+    const back = cleanHtml(card.back);
+    const partOfSpeech = cleanHtml(card.partOfSpeech || '') || null;
+    if (!front || !back) return null;
+    return { front, back, partOfSpeech };
+}
+
+function parseImportedJsonDeck(fileContent, originalName) {
+    const data = JSON.parse(fileContent.replace(/^\uFEFF/, ''));
+    const seenCards = new Set();
+    const cards = extractCardsFromJsonValue(data)
+        .map(normalizeImportedCard)
+        .filter(Boolean)
+        .filter((card) => {
+            const key = `${card.front.toLowerCase()}\u0000${card.back.toLowerCase()}`;
+            if (seenCards.has(key)) return false;
+            seenCards.add(key);
+            return true;
+        });
 
     const fallbackName = originalName
         ? path.basename(originalName, path.extname(originalName))
