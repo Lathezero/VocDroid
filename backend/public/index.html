@@ -648,6 +648,104 @@
             word-break: break-word;
         }
 
+        /* 饼图（环形） */
+        .pie-chart {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+            flex-wrap: wrap;
+            margin-top: 18px;
+            padding: 18px;
+            border-radius: 18px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
+        }
+
+        .pie-canvas {
+            position: relative;
+            width: 168px;
+            height: 168px;
+            flex: 0 0 auto;
+        }
+
+        .pie-center {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+        }
+
+        .pie-center-value {
+            font-size: 26px;
+            font-weight: 700;
+            color: #f8fbff;
+        }
+
+        .pie-center-label {
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .pie-legend {
+            flex: 1;
+            min-width: 180px;
+            display: grid;
+            gap: 10px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+        }
+
+        .legend-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            flex: 0 0 auto;
+        }
+
+        .legend-name {
+            flex: 1;
+        }
+
+        .legend-value {
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        /* 折线图 */
+        .line-chart {
+            margin-top: 18px;
+            padding: 18px 14px 10px;
+            border-radius: 18px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
+        }
+
+        .line-svg {
+            width: 100%;
+            height: 220px;
+            display: block;
+        }
+
+        .line-axis {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 8px;
+        }
+
+        .line-axis span {
+            font-size: 12px;
+            color: var(--muted);
+            text-align: center;
+        }
+
         .toast-stack {
             position: fixed;
             right: 18px;
@@ -886,13 +984,13 @@
 
                 <section class="stats-panel">
                     <h3>单词熟练度</h3>
-                    <div id="proficiency-chart" class="bar-chart hidden"></div>
+                    <div id="proficiency-chart" class="pie-chart hidden"></div>
                     <p id="no-proficiency-msg" class="empty-message hidden">暂无熟练度数据</p>
                 </section>
 
                 <section class="stats-panel" style="grid-column: 1 / -1;">
                     <h3>最近 7 天复习频率</h3>
-                    <div id="frequency-chart" class="bar-chart hidden"></div>
+                    <div id="frequency-chart" class="line-chart hidden"></div>
                     <p id="no-frequency-msg" class="empty-message hidden">暂无复习频率数据</p>
                 </section>
             </div>
@@ -1277,13 +1375,13 @@
                     });
                 }
 
-                renderChart('proficiency-chart', 'no-proficiency-msg', stats.proficiency, (item) => {
+                renderPieChart('proficiency-chart', 'no-proficiency-msg', stats.proficiency, (item) => {
                     const statusMap = { new: '新词', learning: '学习中', review: '待复习', graduated: '已掌握' };
                     return statusMap[item.status] || item.status || '未知';
                 });
 
                 const chronologicalFreq = stats.frequency ? [...stats.frequency].reverse() : [];
-                renderChart('frequency-chart', 'no-frequency-msg', chronologicalFreq, (item) => {
+                renderLineChart('frequency-chart', 'no-frequency-msg', chronologicalFreq, (item) => {
                     return item.date ? item.date.substring(5) : '未知';
                 });
             } catch (err) {
@@ -1292,7 +1390,17 @@
             }
         }
 
-        function renderChart(chartId, noDataId, data, labelFormatter) {
+        function getSolidColor(status) {
+            if (status === 'new') return '#94a3b8';
+            if (status === 'learning') return '#f7b84b';
+            if (status === 'review') return '#5b8cff';
+            if (status === 'graduated') return '#7c3aed';
+            if (status) return '#34d399';
+            return '#37d5d6';
+        }
+
+        // 环形饼图：SVG circle + stroke-dasharray 拼接，配右侧图例
+        function renderPieChart(chartId, noDataId, data, labelFormatter) {
             const chartDiv = document.getElementById(chartId);
             const noDataMsg = document.getElementById(noDataId);
             chartDiv.innerHTML = '';
@@ -1306,43 +1414,206 @@
             chartDiv.classList.remove('hidden');
             noDataMsg.classList.add('hidden');
 
+            const total = data.reduce((sum, item) => sum + item.count, 0) || 1;
+            const radius = 70;
+            const circumference = 2 * Math.PI * radius;
+            const svgNS = 'http://www.w3.org/2000/svg';
+
+            const canvas = document.createElement('div');
+            canvas.className = 'pie-canvas';
+
+            const svg = document.createElementNS(svgNS, 'svg');
+            svg.setAttribute('viewBox', '0 0 168 168');
+            svg.setAttribute('width', '168');
+            svg.setAttribute('height', '168');
+            // 从 12 点方向开始顺时针绘制
+            svg.style.transform = 'rotate(-90deg)';
+
+            // 背景圈
+            const track = document.createElementNS(svgNS, 'circle');
+            track.setAttribute('cx', '84');
+            track.setAttribute('cy', '84');
+            track.setAttribute('r', String(radius));
+            track.setAttribute('fill', 'none');
+            track.setAttribute('stroke', 'rgba(255,255,255,0.06)');
+            track.setAttribute('stroke-width', '22');
+            svg.appendChild(track);
+
+            let offset = 0;
+            const arcs = [];
+            data.forEach((item) => {
+                const fraction = item.count / total;
+                const arc = document.createElementNS(svgNS, 'circle');
+                arc.setAttribute('cx', '84');
+                arc.setAttribute('cy', '84');
+                arc.setAttribute('r', String(radius));
+                arc.setAttribute('fill', 'none');
+                arc.setAttribute('stroke', getSolidColor(item.status));
+                arc.setAttribute('stroke-width', '22');
+                arc.setAttribute('stroke-dasharray', `0 ${circumference}`);
+                arc.dataset.target = String(fraction * circumference);
+                arc.dataset.offset = String(-offset * circumference);
+                arc.setAttribute('stroke-dashoffset', String(-offset * circumference));
+                svg.appendChild(arc);
+                arcs.push(arc);
+                offset += fraction;
+            });
+
+            canvas.appendChild(svg);
+
+            const center = document.createElement('div');
+            center.className = 'pie-center';
+            center.innerHTML = `<div class="pie-center-value">${total}</div><div class="pie-center-label">总计</div>`;
+            canvas.appendChild(center);
+
+            const legend = document.createElement('div');
+            legend.className = 'pie-legend';
+            data.forEach((item) => {
+                const percent = ((item.count / total) * 100).toFixed(0);
+                const row = document.createElement('div');
+                row.className = 'legend-item';
+                row.innerHTML = `
+                    <span class="legend-dot" style="background:${getSolidColor(item.status)}"></span>
+                    <span class="legend-name">${labelFormatter(item)}</span>
+                    <span class="legend-value">${item.count} · ${percent}%</span>
+                `;
+                legend.appendChild(row);
+            });
+
+            chartDiv.appendChild(canvas);
+            chartDiv.appendChild(legend);
+
+            // 动画：每段弧线从 0 展开到目标长度
+            arcs.forEach((arc, index) => {
+                gsap.to(arc, {
+                    attr: { 'stroke-dasharray': `${arc.dataset.target} ${circumference}` },
+                    duration: 0.8,
+                    delay: index * 0.08,
+                    ease: 'power2.out'
+                });
+            });
+            gsap.fromTo(legend.children, { x: -12, autoAlpha: 0 }, { x: 0, autoAlpha: 1, duration: 0.3, stagger: 0.06, ease: 'power2.out' });
+        }
+
+        // 折线图：SVG polyline + 渐变填充 + 数据点，底部 X 轴标签
+        function renderLineChart(chartId, noDataId, data, labelFormatter) {
+            const chartDiv = document.getElementById(chartId);
+            const noDataMsg = document.getElementById(noDataId);
+            chartDiv.innerHTML = '';
+
+            if (!data || data.length === 0) {
+                chartDiv.classList.add('hidden');
+                noDataMsg.classList.remove('hidden');
+                return;
+            }
+
+            chartDiv.classList.remove('hidden');
+            noDataMsg.classList.add('hidden');
+
+            const svgNS = 'http://www.w3.org/2000/svg';
+            const width = 700;
+            const height = 220;
+            const padX = 24;
+            const padTop = 20;
+            const padBottom = 20;
+            const chartW = width - padX * 2;
+            const chartH = height - padTop - padBottom;
             const maxVal = Math.max(...data.map((item) => item.count), 1);
 
-            data.forEach((item, index) => {
-                const heightPercent = Math.max((item.count / maxVal) * 100, 5);
-                const container = document.createElement('div');
-                container.className = 'bar-container';
-
-                const value = document.createElement('div');
-                value.className = 'bar-value';
-                value.textContent = item.count;
-
-                const bar = document.createElement('div');
-                bar.className = 'bar';
-                bar.style.background = getColor(item.status);
-                bar.style.height = '6px';
-
-                const label = document.createElement('div');
-                label.className = 'bar-label';
-                label.textContent = labelFormatter(item);
-
-                container.appendChild(value);
-                container.appendChild(bar);
-                container.appendChild(label);
-                chartDiv.appendChild(container);
-
-                gsap.to(bar, {
-                    height: `${heightPercent}%`,
-                    duration: 0.7,
-                    delay: index * 0.05,
-                    ease: 'power3.out'
-                });
-                gsap.fromTo(
-                    container,
-                    { y: 14, autoAlpha: 0 },
-                    { y: 0, autoAlpha: 1, duration: 0.35, delay: index * 0.05, ease: 'power2.out' }
-                );
+            const points = data.map((item, index) => {
+                const x = data.length > 1 ? padX + (chartW * index) / (data.length - 1) : padX + chartW / 2;
+                const y = padTop + chartH * (1 - item.count / maxVal);
+                return { x, y, item };
             });
+
+            const svg = document.createElementNS(svgNS, 'svg');
+            svg.setAttribute('class', 'line-svg');
+            svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+            svg.setAttribute('preserveAspectRatio', 'none');
+
+            // 横向网格线
+            for (let i = 0; i <= 4; i++) {
+                const y = padTop + (chartH * i) / 4;
+                const grid = document.createElementNS(svgNS, 'line');
+                grid.setAttribute('x1', String(padX));
+                grid.setAttribute('y1', String(y));
+                grid.setAttribute('x2', String(width - padX));
+                grid.setAttribute('y2', String(y));
+                grid.setAttribute('stroke', 'rgba(255,255,255,0.08)');
+                grid.setAttribute('stroke-width', '1');
+                svg.appendChild(grid);
+            }
+
+            // 渐变定义
+            const defs = document.createElementNS(svgNS, 'defs');
+            defs.innerHTML = `
+                <linearGradient id="lineFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="rgba(91,140,255,0.34)" />
+                    <stop offset="100%" stop-color="rgba(91,140,255,0)" />
+                </linearGradient>
+            `;
+            svg.appendChild(defs);
+
+            const pointsAttr = points.map((p) => `${p.x},${p.y}`).join(' ');
+
+            // 填充区域
+            const area = document.createElementNS(svgNS, 'polygon');
+            area.setAttribute('points', `${padX},${padTop + chartH} ${pointsAttr} ${width - padX},${padTop + chartH}`);
+            area.setAttribute('fill', 'url(#lineFill)');
+            svg.appendChild(area);
+
+            // 折线
+            const line = document.createElementNS(svgNS, 'polyline');
+            line.setAttribute('points', pointsAttr);
+            line.setAttribute('fill', 'none');
+            line.setAttribute('stroke', '#5b8cff');
+            line.setAttribute('stroke-width', '3');
+            line.setAttribute('stroke-linecap', 'round');
+            line.setAttribute('stroke-linejoin', 'round');
+            svg.appendChild(line);
+
+            // 数据点
+            points.forEach((p) => {
+                const dot = document.createElementNS(svgNS, 'circle');
+                dot.setAttribute('cx', String(p.x));
+                dot.setAttribute('cy', String(p.y));
+                dot.setAttribute('r', '4');
+                dot.setAttribute('fill', '#fff');
+                dot.setAttribute('stroke', '#5b8cff');
+                dot.setAttribute('stroke-width', '2.5');
+                svg.appendChild(dot);
+
+                const valueText = document.createElementNS(svgNS, 'text');
+                valueText.setAttribute('x', String(p.x));
+                valueText.setAttribute('y', String(p.y - 10));
+                valueText.setAttribute('fill', '#f8fbff');
+                valueText.setAttribute('font-size', '12');
+                valueText.setAttribute('text-anchor', 'middle');
+                valueText.textContent = p.item.count;
+                svg.appendChild(valueText);
+            });
+
+            chartDiv.appendChild(svg);
+
+            // X 轴标签
+            const axis = document.createElement('div');
+            axis.className = 'line-axis';
+            points.forEach((p) => {
+                const span = document.createElement('span');
+                span.textContent = labelFormatter(p.item);
+                axis.appendChild(span);
+            });
+            chartDiv.appendChild(axis);
+
+            // 折线从左到右描边动画
+            const length = line.getTotalLength ? line.getTotalLength() : 0;
+            if (length) {
+                line.style.strokeDasharray = String(length);
+                line.style.strokeDashoffset = String(length);
+                gsap.to(line, { strokeDashoffset: 0, duration: 0.9, ease: 'power2.out' });
+            }
+            gsap.fromTo(area, { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.6, delay: 0.3 });
+            gsap.fromTo(svg.querySelectorAll('circle, text'), { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.3, stagger: 0.05, delay: 0.5 });
         }
 
         function getColor(status) {

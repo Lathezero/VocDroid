@@ -26,6 +26,9 @@ import androidx.compose.ui.unit.dp
 fun MainTabScreen(
     role: String,
     onNavigateToStudy: (String) -> Unit,
+    onNavigateToSpell: (String) -> Unit,
+    onNavigateToReviewDue: () -> Unit,
+    onNavigateToCardManager: (Int, String) -> Unit,
     onNavigateToImport: () -> Unit,
     onNavigateToOcrImport: () -> Unit,
     onNavigateToAdmin: () -> Unit,
@@ -80,8 +83,11 @@ fun MainTabScreen(
             when (selectedTabIndex) {
                 0 -> HomeScreen(
                     onNavigateToStudy = onNavigateToStudy,
+                    onNavigateToSpell = onNavigateToSpell,
                     onNavigateToImport = onNavigateToImport,
                     onNavigateToOcrImport = onNavigateToOcrImport,
+                    onNavigateToCardManager = onNavigateToCardManager,
+                    onNavigateToReviewDue = onNavigateToReviewDue,
                     modifier = paddingModifier
                 )
                 1 -> StatisticsScreen(modifier = paddingModifier)

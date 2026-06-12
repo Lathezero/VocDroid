@@ -1,6 +1,7 @@
 package com.example.ankiclone.ui.screens
 
 import android.widget.Toast
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -18,12 +20,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.ankiclone.data.api.AuthRequest
 import com.example.ankiclone.data.api.RetrofitClient
+import com.example.ankiclone.data.local.CredentialStore
 import com.example.ankiclone.ui.components.AppScreen
 import com.example.ankiclone.ui.components.GlassCard
 import com.example.ankiclone.ui.components.InfoPill
@@ -37,12 +41,15 @@ import retrofit2.HttpException
 
 @Composable
 fun AuthScreen(onNavigateToHome: (String) -> Unit) {
-    var username by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
+    val context = LocalContext.current
+    val credentialStore = remember { CredentialStore(context) }
+
+    var username by remember { mutableStateOf(credentialStore.savedUsername) }
+    var password by remember { mutableStateOf(credentialStore.savedPassword) }
+    var rememberCredentials by remember { mutableStateOf(credentialStore.rememberEnabled) }
     var isLogin by remember { mutableStateOf(true) }
     var isLoading by remember { mutableStateOf(false) }
 
-    val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
     fun parseAuthError(error: Throwable): String {
@@ -110,6 +117,22 @@ fun AuthScreen(onNavigateToHome: (String) -> Unit) {
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { rememberCredentials = !rememberCredentials },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = rememberCredentials,
+                            onCheckedChange = { rememberCredentials = it }
+                        )
+                        Text(
+                            text = "记住账号密码",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
                     Text(
                         text = if (isLogin) "登录后可直接查看牌组、统计和个人页面。" else "注册成功后会自动完成登录。",
                         style = MaterialTheme.typography.bodySmall,
@@ -134,6 +157,11 @@ fun AuthScreen(onNavigateToHome: (String) -> Unit) {
                                         RetrofitClient.apiService.login(request)
                                     }
                                     RetrofitClient.authToken = response.token
+                                    if (rememberCredentials) {
+                                        credentialStore.save(username, password)
+                                    } else {
+                                        credentialStore.clear()
+                                    }
                                     onNavigateToHome(response.user.role)
                                 } catch (e: Exception) {
                                     Toast.makeText(context, parseAuthError(e), Toast.LENGTH_LONG).show()

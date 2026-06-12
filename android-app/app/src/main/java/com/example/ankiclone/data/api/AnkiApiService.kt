@@ -15,6 +15,9 @@ interface AnkiApiService {
     @POST("/api/decks")
     suspend fun createDeck(@Body deck: DeckRequest): CreateDeckResponse
 
+    @DELETE("/api/decks/{id}")
+    suspend fun deleteDeck(@Path("id") deckId: Int): retrofit2.Response<Unit>
+
     @POST("/api/translate/words")
     suspend fun translateWords(@Body request: TranslateWordsRequest): TranslateWordsResponse
 
@@ -27,6 +30,18 @@ interface AnkiApiService {
 
     @GET("/api/decks/{id}/cards")
     suspend fun getCardsForDeck(@Path("id") deckId: Int): List<Card>
+
+    @GET("/api/decks/{id}/cards/all")
+    suspend fun getAllCardsForDeck(@Path("id") deckId: Int): List<Card>
+
+    @GET("/api/review/due")
+    suspend fun getDueCards(): List<Card>
+
+    @PUT("/api/cards/{id}")
+    suspend fun updateCard(@Path("id") cardId: Int, @Body request: UpdateCardRequest): retrofit2.Response<Unit>
+
+    @DELETE("/api/cards/{id}")
+    suspend fun deleteCard(@Path("id") cardId: Int): retrofit2.Response<Unit>
 
     @POST("/api/cards/{id}/review")
     suspend fun reviewCard(@Path("id") cardId: Int, @Body result: ReviewResult): ReviewResponse

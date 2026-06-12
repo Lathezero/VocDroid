@@ -5,6 +5,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -40,8 +41,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -429,5 +435,304 @@ fun DualActionRow(
             onClick = onPrimaryClick,
             modifier = Modifier.weight(1f)
         )
+    }
+}
+
+// =======================
+// 图表组件
+// =======================
+
+data class PieSlice(val label: String, val value: Int, val color: Color)
+
+data class ChartPoint(val label: String, val value: Int)
+
+/** 环形饼图：展示各状态占比，右侧（小屏下方）配图例。 */
+@Composable
+fun DonutChart(
+    slices: List<PieSlice>,
+    modifier: Modifier = Modifier
+) {
+    val total = slices.sumOf { it.value }.coerceAtLeast(1)
+    val animatedProgress by animateFloatAsState(
+        targetValue = 1f,
+        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        label = "donutAnimation"
+    )
+
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(20.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(140.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val strokeWidth = size.minDimension * 0.16f
+                val diameter = size.minDimension - strokeWidth
+                val topLeft = Offset(
+                    (size.width - diameter) / 2f,
+                    (size.height - diameter) / 2f
+                )
+                val arcSize = Size(diameter, diameter)
+                var startAngle = -90f
+                slices.forEach { slice ->
+                    val sweep = slice.value.toFloat() / total.toFloat() * 360f * animatedProgress
+                    drawArc(
+                        color = slice.color,
+                        startAngle = startAngle,
+                        sweepAngle = sweep,
+                        useCenter = false,
+                        topLeft = topLeft,
+                        size = arcSize,
+                        style = Stroke(width = strokeWidth, cap = StrokeCap.Butt)
+                    )
+                    startAngle += slice.value.toFloat() / total.toFloat() * 360f
+                }
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = total.toString(),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "总计",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            slices.forEach { slice ->
+                val percent = slice.value.toFloat() / total.toFloat() * 100f
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(12.dp)
+                            .clip(CircleShape)
+                            .background(slice.color)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = slice.label,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = "${slice.value} · ${"%.0f".format(percent)}%",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** 折线图：展示按顺序排列的数据点趋势，底部带 X 轴标签。 */
+@Composable
+fun LineChart(
+    points: List<ChartPoint>,
+    lineColor: Color,
+    modifier: Modifier = Modifier
+) {
+    if (points.isEmpty()) return
+    val maxValue = (points.maxOfOrNull { it.value } ?: 1).coerceAtLeast(1)
+    val animatedProgress by animateFloatAsState(
+        targetValue = 1f,
+        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        label = "lineAnimation"
+    )
+    val gridColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f)
+    val fillColor = lineColor.copy(alpha = 0.16f)
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(180.dp)
+        ) {
+            val leftPad = 8f
+            val rightPad = 8f
+            val topPad = 12f
+            val bottomPad = 12f
+            val chartWidth = size.width - leftPad - rightPad
+            val chartHeight = size.height - topPad - bottomPad
+
+            // 横向网格线
+            val gridLines = 4
+            for (i in 0..gridLines) {
+                val y = topPad + chartHeight * i / gridLines
+                drawLine(
+                    color = gridColor,
+                    start = Offset(leftPad, y),
+                    end = Offset(size.width - rightPad, y),
+                    strokeWidth = 1.5f
+                )
+            }
+
+            val stepX = if (points.size > 1) chartWidth / (points.size - 1) else 0f
+            val offsets = points.mapIndexed { index, point ->
+                val x = leftPad + stepX * index
+                val ratio = point.value.toFloat() / maxValue.toFloat()
+                val y = topPad + chartHeight * (1f - ratio * animatedProgress)
+                Offset(x, y)
+            }
+
+            // 折线下方渐变填充
+            val fillPath = Path().apply {
+                moveTo(offsets.first().x, topPad + chartHeight)
+                offsets.forEach { lineTo(it.x, it.y) }
+                lineTo(offsets.last().x, topPad + chartHeight)
+                close()
+            }
+            drawPath(path = fillPath, color = fillColor)
+
+            // 折线
+            val linePath = Path().apply {
+                offsets.forEachIndexed { index, offset ->
+                    if (index == 0) moveTo(offset.x, offset.y) else lineTo(offset.x, offset.y)
+                }
+            }
+            drawPath(
+                path = linePath,
+                color = lineColor,
+                style = Stroke(width = 4f, cap = StrokeCap.Round)
+            )
+
+            // 数据点
+            offsets.forEach { offset ->
+                drawCircle(color = lineColor, radius = 6f, center = offset)
+                drawCircle(color = Color.White, radius = 2.5f, center = offset)
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            points.forEach { point ->
+                Text(
+                    text = point.label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 艾宾浩斯遗忘曲线：记忆保持率 R = e^(-t/S) 的理论曲线，
+ * 并标注推荐的复习时间点（5分钟、30分钟、12小时、1天、2天、4天、7天、15天）。
+ */
+@Composable
+fun ForgettingCurveChart(
+    modifier: Modifier = Modifier
+) {
+    val curveColor = MaterialTheme.colorScheme.secondary
+    val pointColor = MaterialTheme.colorScheme.primary
+    val gridColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f)
+    val fillColor = curveColor.copy(alpha = 0.14f)
+    val animatedProgress by animateFloatAsState(
+        targetValue = 1f,
+        animationSpec = tween(durationMillis = 1000, easing = FastOutSlowInEasing),
+        label = "forgettingAnimation"
+    )
+
+    // 横轴用对数刻度（天），覆盖 0~30 天；S 为记忆稳定度参数。
+    val dayMarks = listOf(0f, 1f, 2f, 4f, 7f, 15f, 30f)
+    val stability = 1.8f
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(190.dp)
+        ) {
+            val leftPad = 8f
+            val rightPad = 8f
+            val topPad = 12f
+            val bottomPad = 12f
+            val chartWidth = size.width - leftPad - rightPad
+            val chartHeight = size.height - topPad - bottomPad
+
+            for (i in 0..4) {
+                val y = topPad + chartHeight * i / 4
+                drawLine(
+                    color = gridColor,
+                    start = Offset(leftPad, y),
+                    end = Offset(size.width - rightPad, y),
+                    strokeWidth = 1.5f
+                )
+            }
+
+            // 用 log(1+day) 归一化横轴，让短期衰减看得更清楚
+            val maxDay = 30f
+            val maxLog = kotlin.math.ln(1f + maxDay)
+            fun dayToX(day: Float): Float =
+                leftPad + chartWidth * (kotlin.math.ln(1f + day) / maxLog)
+            fun retentionToY(r: Float): Float =
+                topPad + chartHeight * (1f - r)
+
+            val samples = 80
+            val curveOffsets = (0..samples).map { i ->
+                val day = maxDay * i / samples
+                val retention = kotlin.math.exp(-day / stability)
+                Offset(dayToX(day), retentionToY(retention))
+            }
+
+            // 仅绘制到 animatedProgress 对应的比例，形成从左到右展开的动画
+            val visibleCount = (curveOffsets.size * animatedProgress).toInt().coerceAtLeast(1)
+            val visible = curveOffsets.take(visibleCount)
+
+            val fillPath = Path().apply {
+                moveTo(visible.first().x, topPad + chartHeight)
+                visible.forEach { lineTo(it.x, it.y) }
+                lineTo(visible.last().x, topPad + chartHeight)
+                close()
+            }
+            drawPath(path = fillPath, color = fillColor)
+
+            val curvePath = Path().apply {
+                visible.forEachIndexed { index, offset ->
+                    if (index == 0) moveTo(offset.x, offset.y) else lineTo(offset.x, offset.y)
+                }
+            }
+            drawPath(
+                path = curvePath,
+                color = curveColor,
+                style = Stroke(width = 4f, cap = StrokeCap.Round)
+            )
+
+            // 复习时间点标注
+            dayMarks.drop(1).forEach { day ->
+                val retention = kotlin.math.exp(-day / stability)
+                val center = Offset(dayToX(day), retentionToY(retention))
+                if (center.x <= leftPad + chartWidth * animatedProgress + 4f) {
+                    drawCircle(color = pointColor, radius = 6f, center = center)
+                    drawCircle(color = Color.White, radius = 2.5f, center = center)
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            listOf("第0天", "1天", "2天", "4天", "7天", "15天", "30天").forEach { mark ->
+                Text(
+                    text = mark,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
     }
 }

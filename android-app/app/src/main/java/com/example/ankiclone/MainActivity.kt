@@ -54,6 +54,15 @@ class MainActivity : ComponentActivity() {
                                 onNavigateToStudy = { deckName ->
                                     navController.navigate("study/$deckName")
                                 },
+                                onNavigateToSpell = { deckName ->
+                                    navController.navigate("spell/$deckName")
+                                },
+                                onNavigateToReviewDue = {
+                                    navController.navigate("study_due")
+                                },
+                                onNavigateToCardManager = { deckId, deckName ->
+                                    navController.navigate("card_manager/$deckId/$deckName")
+                                },
                                 onNavigateToImport = {
                                     navController.navigate("import")
                                 },
@@ -76,6 +85,38 @@ class MainActivity : ComponentActivity() {
                         ) { backStackEntry ->
                             val deckName = backStackEntry.arguments?.getString("deckName") ?: "Unknown"
                             StudyScreen(
+                                deckName = deckName,
+                                onNavigateBack = { navController.popBackStack() }
+                            )
+                        }
+                        composable("study_due") {
+                            StudyScreen(
+                                deckName = "due",
+                                dueMode = true,
+                                onNavigateBack = { navController.popBackStack() }
+                            )
+                        }
+                        composable(
+                            "spell/{deckName}",
+                            arguments = listOf(navArgument("deckName") { type = NavType.StringType })
+                        ) { backStackEntry ->
+                            val deckName = backStackEntry.arguments?.getString("deckName") ?: "Unknown"
+                            SpellScreen(
+                                deckName = deckName,
+                                onNavigateBack = { navController.popBackStack() }
+                            )
+                        }
+                        composable(
+                            "card_manager/{deckId}/{deckName}",
+                            arguments = listOf(
+                                navArgument("deckId") { type = NavType.IntType },
+                                navArgument("deckName") { type = NavType.StringType }
+                            )
+                        ) { backStackEntry ->
+                            val deckId = backStackEntry.arguments?.getInt("deckId") ?: 0
+                            val deckName = backStackEntry.arguments?.getString("deckName") ?: "牌组"
+                            CardManagerScreen(
+                                deckId = deckId,
                                 deckName = deckName,
                                 onNavigateBack = { navController.popBackStack() }
                             )

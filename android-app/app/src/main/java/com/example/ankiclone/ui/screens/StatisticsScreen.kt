@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.CircularProgressIndicator
@@ -23,13 +22,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.example.ankiclone.data.api.RetrofitClient
 import com.example.ankiclone.data.api.StatsResponse
-import com.example.ankiclone.ui.components.AnimatedBar
 import com.example.ankiclone.ui.components.AppScreen
+import com.example.ankiclone.ui.components.ChartPoint
+import com.example.ankiclone.ui.components.DonutChart
 import com.example.ankiclone.ui.components.EmptyStateCard
+import com.example.ankiclone.ui.components.ForgettingCurveChart
+import com.example.ankiclone.ui.components.LineChart
+import com.example.ankiclone.ui.components.PieSlice
 import com.example.ankiclone.ui.components.ScreenHeader
 import com.example.ankiclone.ui.components.SectionCard
 import com.example.ankiclone.ui.components.StatChip
-import kotlin.math.max
 
 @Composable
 fun StatisticsScreen(modifier: Modifier = Modifier) {
@@ -48,8 +50,23 @@ fun StatisticsScreen(modifier: Modifier = Modifier) {
 
     val proficiencyData = stats?.proficiency ?: emptyList()
     val frequencyData = stats?.frequency ?: emptyList()
+    val streak = stats?.streak
     val totalReviewed = proficiencyData.sumOf { it.count }
     val totalFrequency = frequencyData.sumOf { it.count }
+
+    fun statusColor(status: String?): Color = when (status) {
+        "new" -> Color(0xFF94A3B8)
+        "learning" -> Color(0xFFF7B84B)
+        "review" -> Color(0xFF6A8DFF)
+        else -> Color(0xFF35D3C9)
+    }
+
+    fun statusLabel(status: String?): String = when (status) {
+        "new" -> "新词"
+        "learning" -> "学习中"
+        "review" -> "待复习"
+        else -> status ?: "未知"
+    }
 
     AppScreen(modifier = modifier, scrollable = true) {
         ScreenHeader(
@@ -73,6 +90,22 @@ fun StatisticsScreen(modifier: Modifier = Modifier) {
                 modifier = Modifier.weight(1f)
             )
         }
+        Spacer(modifier = Modifier.height(10.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            StatChip(
+                label = "连续打卡",
+                value = "${streak?.current ?: 0} 天",
+                modifier = Modifier.weight(1f)
+            )
+            StatChip(
+                label = "累计复习",
+                value = "${streak?.totalReviews ?: 0} 次",
+                modifier = Modifier.weight(1f)
+            )
+        }
         Spacer(modifier = Modifier.height(18.dp))
         SectionCard(
             title = "学习洞察",
@@ -84,7 +117,9 @@ fun StatisticsScreen(modifier: Modifier = Modifier) {
                 } else if (totalReviewed == 0 && totalFrequency == 0) {
                     "你还没有形成统计样本，完成几次学习后，这里会展示熟练度分布和近期趋势。"
                 } else {
-                    "当前累计记录 $totalReviewed 条熟练度状态，最近 7 天共有 $totalFrequency 次复习，建议优先关注“学习中”和“待复习”词条。"
+                    val base = "当前累计记录 $totalReviewed 条熟练度状态，最近 7 天共有 $totalFrequency 次复习，建议优先关注“学习中”和“待复习”词条。"
+                    val current = streak?.current ?: 0
+                    if (current > 0) "已连续学习 $current 天，继续保持！$base" else base
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -103,78 +138,65 @@ fun StatisticsScreen(modifier: Modifier = Modifier) {
             }
         } else {
             SectionCard(
-                title = "单词熟练度",
-                subtitle = "按新词、学习中、待复习等状态统计"
+                title = "单词熟练度分布",
+                subtitle = "各状态词条占比一目了然"
             ) {
                 if (proficiencyData.isEmpty()) {
                     EmptyStateCard(
                         title = "暂无熟练度数据",
-                        description = "等你开始学习后，这里会展示各状态的柱状统计图。"
+                        description = "等你开始学习后，这里会展示各状态的占比饼图。"
                     )
                 } else {
-                    val maxProficiency = max(1, proficiencyData.maxOfOrNull { it.count } ?: 1)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(180.dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.Bottom
-                    ) {
-                        proficiencyData.forEach { stat ->
-                            val color = when (stat.status) {
-                                "new" -> Color(0xFF94A3B8)
-                                "learning" -> Color(0xFFF7B84B)
-                                "review" -> Color(0xFF6A8DFF)
-                                else -> Color(0xFF35D3C9)
-                            }
-                            val label = when (stat.status) {
-                                "new" -> "新词"
-                                "learning" -> "学习中"
-                                "review" -> "待复习"
-                                else -> stat.status ?: "未知"
-                            }
-                            AnimatedBar(
-                                label = label,
-                                value = stat.count.toString(),
-                                fraction = stat.count.toFloat() / maxProficiency.toFloat(),
-                                color = color,
-                                modifier = Modifier.weight(1f)
+                    DonutChart(
+                        slices = proficiencyData.map { stat ->
+                            PieSlice(
+                                label = statusLabel(stat.status),
+                                value = stat.count,
+                                color = statusColor(stat.status)
                             )
                         }
-                    }
+                    )
                 }
             }
             Spacer(modifier = Modifier.height(16.dp))
             SectionCard(
                 title = "最近 7 天复习频率",
-                subtitle = "按日期统计近期复习次数"
+                subtitle = "按日期展示近期复习次数趋势"
             ) {
                 if (frequencyData.isEmpty()) {
                     EmptyStateCard(
                         title = "暂无复习频率数据",
-                        description = "等你开始复习后，这里会自动绘制 7 天趋势。"
+                        description = "等你开始复习后，这里会自动绘制 7 天折线趋势。"
                     )
                 } else {
-                    val maxFreq = max(1, frequencyData.maxOfOrNull { it.count } ?: 1)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(180.dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.Bottom
-                    ) {
-                        frequencyData.forEach { stat ->
-                            AnimatedBar(
-                                label = stat.date?.substringAfter("-") ?: "未知",
-                                value = stat.count.toString(),
-                                fraction = stat.count.toFloat() / maxFreq.toFloat(),
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
+                    // 后端按日期倒序返回，折线图需要按时间正序展示
+                    LineChart(
+                        points = frequencyData
+                            .sortedBy { it.date }
+                            .map { stat ->
+                                ChartPoint(
+                                    label = stat.date?.substringAfter("-") ?: "未知",
+                                    value = stat.count
+                                )
+                            },
+                        lineColor = MaterialTheme.colorScheme.primary
+                    )
                 }
             }
+            Spacer(modifier = Modifier.height(16.dp))
+            SectionCard(
+                title = "艾宾浩斯遗忘曲线",
+                subtitle = "记忆保持率随时间衰减，圆点为推荐复习时机"
+            ) {
+                ForgettingCurveChart()
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "记忆会随时间快速衰减，按曲线上的关键节点（1、2、4、7、15、30 天）及时复习，可以显著减缓遗忘、巩固长期记忆。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
         }
     }
 }

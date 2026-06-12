@@ -1,6 +1,5 @@
 package com.example.ankiclone.ui.screens
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +13,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -25,6 +25,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -39,36 +40,32 @@ import com.example.ankiclone.ui.components.GlassCard
 import com.example.ankiclone.ui.components.InfoPill
 import com.example.ankiclone.ui.components.PrimaryButton
 import com.example.ankiclone.ui.components.ScreenHeader
-import com.example.ankiclone.ui.components.SecondaryButton
 import com.example.ankiclone.ui.components.StatChip
 import kotlinx.coroutines.launch
 
 @Composable
-fun StudyScreen(
+fun SpellScreen(
     deckName: String,
-    onNavigateBack: () -> Unit,
-    dueMode: Boolean = false
+    onNavigateBack: () -> Unit
 ) {
     var cards by remember { mutableStateOf<List<Card>>(emptyList()) }
     var currentIndex by remember { mutableIntStateOf(0) }
-    var isFlipped by remember { mutableStateOf(false) }
+    var input by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(true) }
     var isReviewing by remember { mutableStateOf(false) }
+    // null = 尚未提交，true/false = 本张卡的判定结果（已提交）
+    var lastCorrect by remember { mutableStateOf<Boolean?>(null) }
     val coroutineScope = rememberCoroutineScope()
     val speak = rememberTts()
 
-    LaunchedEffect(deckName, dueMode) {
+    LaunchedEffect(deckName) {
         coroutineScope.launch {
             try {
-                cards = if (dueMode) {
-                    RetrofitClient.apiService.getDueCards()
+                val id = deckName.toIntOrNull()
+                cards = if (id != null) {
+                    RetrofitClient.apiService.getCardsForDeck(id)
                 } else {
-                    val id = deckName.toIntOrNull()
-                    if (id != null) {
-                        RetrofitClient.apiService.getCardsForDeck(id)
-                    } else {
-                        emptyList()
-                    }
+                    emptyList()
                 }
             } catch (_: Exception) {
                 cards = emptyList()
@@ -78,40 +75,48 @@ fun StudyScreen(
         }
     }
 
-    fun handleReview(rating: Int) {
-        if (currentIndex >= cards.size || isReviewing) return
+    fun submit() {
+        if (currentIndex >= cards.size || isReviewing || lastCorrect != null) return
         val currentCard = cards[currentIndex]
+        val correct = input.trim().equals(currentCard.front_content.trim(), ignoreCase = true)
+        lastCorrect = correct
         isReviewing = true
 
         coroutineScope.launch {
             try {
+                // 拼对按「良好」(2)，拼错按「重来」(0)，让拼写也推进记忆曲线与统计/打卡
                 RetrofitClient.apiService.reviewCard(
                     cardId = currentCard.id,
-                    result = ReviewResult(performanceRating = rating)
+                    result = ReviewResult(performanceRating = if (correct) 2 else 0)
                 )
             } catch (_: Exception) {
             } finally {
                 isReviewing = false
-                isFlipped = false
-                if (rating == 0) {
-                    // 「重来」表示没记住：把当前卡移到队列末尾，本轮稍后重新出现，
-                    // 而不是直接跳到下一张。currentIndex 不变，后面的卡会顶上来。
-                    val reordered = cards.toMutableList()
-                    reordered.removeAt(currentIndex)
-                    reordered.add(currentCard)
-                    cards = reordered
-                } else {
-                    currentIndex++
-                }
             }
+        }
+    }
+
+    fun next() {
+        val correct = lastCorrect
+        val currentCard = cards.getOrNull(currentIndex)
+        lastCorrect = null
+        input = ""
+        if (correct == false && currentCard != null) {
+            // 拼错的卡移到队列末尾，本轮稍后再考一次
+            val reordered = cards.toMutableList()
+            reordered.removeAt(currentIndex)
+            reordered.add(currentCard)
+            cards = reordered
+        } else {
+            currentIndex++
         }
     }
 
     AppScreen {
         ScreenHeader(
-            eyebrow = if (dueMode) "今日复习" else "学习模式",
-            title = if (dueMode) "复习到期卡片" else "正在学习牌组",
-            subtitle = "点击卡片查看答案，并根据掌握程度选择熟练度。"
+            eyebrow = "拼写测验",
+            title = "看中文拼英文",
+            subtitle = "根据中文释义输入对应的英文单词，大小写和首尾空格不影响判定。"
         )
         Spacer(modifier = Modifier.height(18.dp))
 
@@ -121,12 +126,13 @@ fun StudyScreen(
             }
         } else if (cards.isEmpty() || currentIndex >= cards.size) {
             EmptyStateCard(
-                title = "当前牌组已复习完毕",
-                description = "恭喜你，这一轮所有卡片都已经学习完成。",
+                title = "当前牌组已测验完毕",
+                description = "恭喜你，这一轮所有单词都已经拼写完成。",
                 modifier = Modifier.weight(1f)
             )
         } else {
             val currentCard = cards[currentIndex]
+            val answered = lastCorrect != null
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -137,8 +143,8 @@ fun StudyScreen(
                     modifier = Modifier.weight(1f)
                 )
                 StatChip(
-                    label = "当前面",
-                    value = if (isFlipped) "答案" else "问题",
+                    label = "状态",
+                    value = if (answered) (if (lastCorrect == true) "正确" else "错误") else "待作答",
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -147,7 +153,6 @@ fun StudyScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
-                    .clickable(enabled = !isFlipped) { isFlipped = true }
             ) {
                 Box(
                     modifier = Modifier
@@ -156,31 +161,15 @@ fun StudyScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        InfoPill(text = if (isFlipped) "已显示答案" else "点击卡片查看答案")
+                        InfoPill(text = "请拼写下列释义对应的英文单词")
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = if (isFlipped) "答案" else "题目",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.secondary
+                            text = currentCard.back_content,
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center
                         )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = if (isFlipped) currentCard.back_content else currentCard.front_content,
-                                style = MaterialTheme.typography.headlineMedium,
-                                fontWeight = FontWeight.Bold,
-                                textAlign = TextAlign.Center
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            IconButton(onClick = { speak(currentCard.front_content) }) {
-                                Text(
-                                    text = "🔊",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = MaterialTheme.colorScheme.secondary
-                                )
-                            }
-                        }
-                        if (isFlipped && !currentCard.part_of_speech.isNullOrBlank()) {
+                        if (!currentCard.part_of_speech.isNullOrBlank()) {
                             Spacer(modifier = Modifier.height(10.dp))
                             Text(
                                 text = "词性：${currentCard.part_of_speech}",
@@ -188,47 +177,51 @@ fun StudyScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        if (!isFlipped) {
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = "先在脑海中回忆答案，再点击卡片进行校验。",
-                                style = MaterialTheme.typography.bodySmall,
-                                textAlign = TextAlign.Center,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                        Spacer(modifier = Modifier.height(20.dp))
+                        OutlinedTextField(
+                            value = input,
+                            onValueChange = { if (!answered) input = it },
+                            singleLine = true,
+                            enabled = !answered,
+                            label = { Text("输入英文单词") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        if (answered) {
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = if (lastCorrect == true) "✓ 回答正确" else "✗ 正确答案：${currentCard.front_content}",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center,
+                                    color = if (lastCorrect == true) Color(0xFF35D3C9) else Color(0xFFF87171)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                IconButton(onClick = { speak(currentCard.front_content) }) {
+                                    Text(
+                                        text = "🔊",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = MaterialTheme.colorScheme.secondary
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
             Spacer(modifier = Modifier.height(16.dp))
-            if (isFlipped) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        SecondaryButton("重来", { handleReview(0) }, Modifier.weight(1f), !isReviewing)
-                        SecondaryButton("困难", { handleReview(1) }, Modifier.weight(1f), !isReviewing)
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        PrimaryButton("良好", { handleReview(2) }, Modifier.weight(1f), !isReviewing)
-                        PrimaryButton("简单", { handleReview(3) }, Modifier.weight(1f), !isReviewing)
-                    }
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "根据掌握程度选择评分，系统会据此安排后续复习频率。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+            if (answered) {
+                PrimaryButton(
+                    text = "下一题",
+                    onClick = { next() },
+                    modifier = Modifier.fillMaxWidth()
                 )
             } else {
                 PrimaryButton(
-                    text = "显示答案",
-                    onClick = { isFlipped = true },
-                    modifier = Modifier.fillMaxWidth()
+                    text = "提交",
+                    onClick = { submit() },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !isReviewing && input.isNotBlank()
                 )
             }
         }

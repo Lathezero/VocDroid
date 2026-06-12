@@ -758,9 +758,121 @@ app.get('/api/decks/:id/cards', authenticate, (req, res) => {
     });
 });
 
+// GET /api/decks/:id/cards/all (管理用：返回该牌组全部卡片，不做到期过滤)
+app.get('/api/decks/:id/cards/all', authenticate, (req, res) => {
+    const deckId = req.params.id;
+    db.get(`SELECT * FROM decks WHERE id = ? AND user_id = ?`, [deckId, req.user.id], (err, deck) => {
+        if (err) return res.status(500).json({ error: 'Database error' });
+        if (!deck) return res.status(404).json({ error: 'Deck not found or unauthorized' });
+
+        db.all(`SELECT * FROM cards WHERE deck_id = ? ORDER BY id ASC`, [deckId], (err, cards) => {
+            if (err) return res.status(500).json({ error: 'Database error' });
+            res.json(cards);
+        });
+    });
+});
+
+// GET /api/review/due (跨牌组聚合当前用户所有到期/新卡片，用于今日待复习)
+app.get('/api/review/due', authenticate, (req, res) => {
+    const now = new Date().toISOString();
+    db.all(
+        `SELECT cards.* FROM cards
+         JOIN decks ON cards.deck_id = decks.id
+         WHERE decks.user_id = ? AND (cards.status = 'new' OR cards.next_review <= ?)
+         ORDER BY cards.next_review IS NULL DESC, cards.next_review ASC`,
+        [req.user.id, now],
+        (err, cards) => {
+            if (err) return res.status(500).json({ error: 'Database error' });
+            res.json(cards);
+        }
+    );
+});
+
+// DELETE /api/decks/:id (删除牌组及其卡片、复习日志，仅限本人)
+app.delete('/api/decks/:id', authenticate, (req, res) => {
+    const deckId = req.params.id;
+    db.get(`SELECT * FROM decks WHERE id = ? AND user_id = ?`, [deckId, req.user.id], (err, deck) => {
+        if (err) return res.status(500).json({ error: 'Database error' });
+        if (!deck) return res.status(404).json({ error: 'Deck not found or unauthorized' });
+
+        // 先删该牌组下所有卡片的复习日志，再删卡片，最后删牌组，避免留下孤儿数据
+        db.run(
+            `DELETE FROM review_logs WHERE card_id IN (SELECT id FROM cards WHERE deck_id = ?)`,
+            [deckId],
+            (logErr) => {
+                if (logErr) return res.status(500).json({ error: 'Database error deleting review logs' });
+                db.run(`DELETE FROM cards WHERE deck_id = ?`, [deckId], (cardErr) => {
+                    if (cardErr) return res.status(500).json({ error: 'Database error deleting cards' });
+                    db.run(`DELETE FROM decks WHERE id = ?`, [deckId], (deckErr) => {
+                        if (deckErr) return res.status(500).json({ error: 'Database error deleting deck' });
+                        res.json({ message: 'Deck deleted successfully' });
+                    });
+                });
+            }
+        );
+    });
+});
+
 // =======================
 // CARDS ROUTES
 // =======================
+
+// PUT /api/cards/:id (编辑单卡，校验卡片所属牌组归当前用户)
+app.put('/api/cards/:id', authenticate, (req, res) => {
+    const cardId = req.params.id;
+    const { front, front_content, back, back_content, partOfSpeech, part_of_speech } = req.body;
+    const frontValue = (front !== undefined ? front : front_content);
+    const backValue = (back !== undefined ? back : back_content);
+    const posValue = (partOfSpeech !== undefined ? partOfSpeech : part_of_speech) || null;
+
+    if (!frontValue || !backValue) {
+        return res.status(400).json({ error: 'Front and back content are required' });
+    }
+
+    // 通过 JOIN 校验该卡片属于当前用户的牌组
+    db.get(
+        `SELECT cards.id FROM cards
+         JOIN decks ON cards.deck_id = decks.id
+         WHERE cards.id = ? AND decks.user_id = ?`,
+        [cardId, req.user.id],
+        (err, card) => {
+            if (err) return res.status(500).json({ error: 'Database error' });
+            if (!card) return res.status(404).json({ error: 'Card not found or unauthorized' });
+
+            db.run(
+                `UPDATE cards SET front_content = ?, back_content = ?, part_of_speech = ? WHERE id = ?`,
+                [frontValue, backValue, posValue, cardId],
+                (updateErr) => {
+                    if (updateErr) return res.status(500).json({ error: 'Database error updating card' });
+                    res.json({ message: 'Card updated successfully' });
+                }
+            );
+        }
+    );
+});
+
+// DELETE /api/cards/:id (删除单卡及其复习日志，校验归属)
+app.delete('/api/cards/:id', authenticate, (req, res) => {
+    const cardId = req.params.id;
+    db.get(
+        `SELECT cards.id FROM cards
+         JOIN decks ON cards.deck_id = decks.id
+         WHERE cards.id = ? AND decks.user_id = ?`,
+        [cardId, req.user.id],
+        (err, card) => {
+            if (err) return res.status(500).json({ error: 'Database error' });
+            if (!card) return res.status(404).json({ error: 'Card not found or unauthorized' });
+
+            db.run(`DELETE FROM review_logs WHERE card_id = ?`, [cardId], (logErr) => {
+                if (logErr) return res.status(500).json({ error: 'Database error deleting review logs' });
+                db.run(`DELETE FROM cards WHERE id = ?`, [cardId], (cardErr) => {
+                    if (cardErr) return res.status(500).json({ error: 'Database error deleting card' });
+                    res.json({ message: 'Card deleted successfully' });
+                });
+            });
+        }
+    );
+});
 
 // POST /api/cards/:id/review
 app.post('/api/cards/:id/review', authenticate, (req, res) => {
@@ -843,18 +955,73 @@ app.get('/api/stats', authenticate, (req, res) => {
 
         // 2. Review frequency (count of reviews per day for the last 7 days)
         db.all(`
-            SELECT date(review_date) as date, COUNT(*) as count 
-            FROM review_logs 
-            WHERE user_id = ? 
-            GROUP BY date(review_date) 
-            ORDER BY date(review_date) DESC 
+            SELECT date(review_date) as date, COUNT(*) as count
+            FROM review_logs
+            WHERE user_id = ?
+            GROUP BY date(review_date)
+            ORDER BY date(review_date) DESC
             LIMIT 7
         `, [req.user.id], (err, frequencyRows) => {
             if (err) return res.status(500).json({ error: 'Database error fetching frequency' });
-            
-            res.json({
-                proficiency: proficiencyRows,
-                frequency: frequencyRows
+
+            // 3. Streak / 累计复习：取所有去重的复习日期（按 UTC 截断，与上面 frequency 一致），
+            //    在 JS 中计算「连续打卡天数」「历史最长连续」「累计复习次数」。
+            db.all(`
+                SELECT date(review_date) as d, COUNT(*) as count
+                FROM review_logs
+                WHERE user_id = ?
+                GROUP BY date(review_date)
+                ORDER BY d DESC
+            `, [req.user.id], (err, dayRows) => {
+                if (err) return res.status(500).json({ error: 'Database error fetching streak' });
+
+                const totalReviews = dayRows.reduce((sum, row) => sum + row.count, 0);
+                const days = dayRows.map(row => row.d); // 已按日期倒序
+
+                // 以 UTC 计算「今天/昨天」，与 date(review_date) 的截断口径保持一致
+                const dayMs = 24 * 60 * 60 * 1000;
+                const toUtcDay = (str) => {
+                    const [y, m, d] = str.split('-').map(Number);
+                    return Date.UTC(y, m - 1, d);
+                };
+                const todayUtc = (() => {
+                    const now = new Date();
+                    return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+                })();
+
+                // 当前连续：从今天往前数；今天没记录但昨天有，则从昨天起算（不归零）
+                let current = 0;
+                if (days.length > 0) {
+                    const newest = toUtcDay(days[0]);
+                    const gapFromToday = Math.round((todayUtc - newest) / dayMs);
+                    if (gapFromToday <= 1) {
+                        current = 1;
+                        for (let i = 1; i < days.length; i++) {
+                            const gap = Math.round((toUtcDay(days[i - 1]) - toUtcDay(days[i])) / dayMs);
+                            if (gap === 1) current++;
+                            else break;
+                        }
+                    }
+                }
+
+                // 历史最长连续
+                let longest = 0;
+                let run = 0;
+                for (let i = 0; i < days.length; i++) {
+                    if (i === 0) {
+                        run = 1;
+                    } else {
+                        const gap = Math.round((toUtcDay(days[i - 1]) - toUtcDay(days[i])) / dayMs);
+                        run = gap === 1 ? run + 1 : 1;
+                    }
+                    if (run > longest) longest = run;
+                }
+
+                res.json({
+                    proficiency: proficiencyRows,
+                    frequency: frequencyRows,
+                    streak: { current, longest, totalReviews }
+                });
             });
         });
     });

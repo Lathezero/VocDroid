@@ -49,6 +49,12 @@ data class AddCardsRequest(
     val cards: List<CardRequest>
 )
 
+data class UpdateCardRequest(
+    val front: String,
+    val back: String,
+    val partOfSpeech: String? = null
+)
+
 data class Deck(
     val id: Int,
     val user_id: Int,
@@ -87,7 +93,14 @@ data class FrequencyStat(
     val count: Int
 )
 
+data class StreakStat(
+    val current: Int = 0,
+    val longest: Int = 0,
+    val totalReviews: Int = 0
+)
+
 data class StatsResponse(
     val proficiency: List<ProficiencyStat>,
-    val frequency: List<FrequencyStat>
+    val frequency: List<FrequencyStat>,
+    val streak: StreakStat? = null
 )

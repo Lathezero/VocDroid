@@ -34,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.example.ankiclone.data.api.AddCardsRequest
+import com.example.ankiclone.data.api.BaiduTranslator
 import com.example.ankiclone.data.api.CardRequest
 import com.example.ankiclone.data.api.Deck
 import com.example.ankiclone.data.api.DeckRequest
@@ -230,10 +231,29 @@ private suspend fun translateWordsWithBackend(words: List<String>): Map<String, 
     return translations
 }
 
+// 匹配译文开头的词性前缀，如 "n. 能力"、"vt. 携带"、"adj.&adv. ..."。
+// 词性后通常跟 "." 或 "．"，再接中文释义。
+private val posPrefixRegex = Regex(
+    """^\s*((?:n|v|vt|vi|adj|adv|prep|conj|pron|num|art|int|aux|abbr)(?:\s*[.&，,]\s*(?:n|v|vt|vi|adj|adv|prep|conj|pron|num|art|int|aux|abbr))*)\s*[.．、]\s*(.+)$""",
+    RegexOption.IGNORE_CASE
+)
+
+/**
+ * 从中文释义里拆出词性前缀。
+ * 命中则返回（词性, 去掉前缀的纯释义）；没有前缀则返回（null, 原文）。
+ */
+private fun splitPartOfSpeech(translation: String): Pair<String?, String> {
+    val match = posPrefixRegex.find(translation.trim()) ?: return null to translation.trim()
+    val pos = match.groupValues[1].trim() + "."
+    val meaning = match.groupValues[2].trim()
+    return if (meaning.isNotBlank()) pos to meaning else null to translation.trim()
+}
+
 private fun buildTranslatedCards(words: List<String>, translations: Map<String, String>): List<CardRequest> {
     return words.map { word ->
-        val translation = translations[word]?.takeIf { it.isNotBlank() } ?: "待补充释义"
-        CardRequest(front = word, back = translation)
+        val rawTranslation = translations[word]?.takeIf { it.isNotBlank() } ?: "待补充释义"
+        val (partOfSpeech, meaning) = splitPartOfSpeech(rawTranslation)
+        CardRequest(front = word, back = meaning, partOfSpeech = partOfSpeech)
     }
 }
 
@@ -287,14 +307,18 @@ fun OcrImportScreen(onNavigateBack: () -> Unit) {
         isLoading = true
         coroutineScope.launch {
             try {
-                val translationMap = translateWordsWithBackend(words)
-                val cards = buildTranslatedCards(words, translationMap)
+                // 翻译源优先级：百度（已配置时）→ 后端 → 客户端直连。
+                // 任一级若没拿到任何译文，自动尝试下一级，避免整批变成「待补充释义」。
+                var translationMap: Map<String, String> = emptyMap()
 
-                if (cards.isEmpty()) {
-                    Toast.makeText(context, "提取到单词，但未获取到中文释义", Toast.LENGTH_SHORT).show()
-                    return@launch
+                if (BaiduTranslator.isConfigured) {
+                    translationMap = BaiduTranslator.translate(words)
+                }
+                if (translationMap.isEmpty()) {
+                    translationMap = translateWordsWithBackend(words)
                 }
 
+                val cards = buildTranslatedCards(words, translationMap)
                 parsedCards = cards
                 Toast.makeText(context, "成功提取并翻译 ${cards.size} 个单词", Toast.LENGTH_SHORT).show()
                 step = 3
